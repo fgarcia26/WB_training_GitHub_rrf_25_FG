@@ -4,6 +4,8 @@
 *------------------------------------------------------------------------------- 
 	// Load household-level data (HH)
 	use "${data}/Intermediate/TZA_CCT_HH.dta", clear
+	*use "${data}/Intermediate/TZA_CCT_HH_mem", clear
+	*use "${data}/Intermediate/TZA_amenity_tidy", clear
 	
 	
 	// Exercise 1: Plan construction outputs ----
@@ -22,48 +24,53 @@
 				// Equal to area farm if unit is acres, 
 				// otherwise multiplied by value of hectare in acres
 			// 2. USD conversion factor.
+			
+* A hectare is a metric unit of area, equivalent to 10,000 square meters or about 2.47 acres, while an acre is an imperial unit of area, equal to 43,560 square feet or about 0.405 hectares.
 	
-		global acre_conv ???
+		global acre_conv 2.47 
 	
 	di $acre_conv
 	
-	generate 	area_acre = ??? 				if ??? == 1 , after(ar_farm)
-	replace 	area_acre = ??? * $acre_conv 	if ??? == 2
+	generate 	area_acre = ar_farm 				if ar_farm == 1 , after(ar_farm)
+	replace 	area_acre = ar_farm * $acre_conv 	if ar_farm == 2
 	
-	lab var		area_acre ???
+	lab var		area_acre "Area farmed in acres"
 	
 	* Consumption in usd
-	global usd ???
+	global usd 0.00037
 	
-	foreach cons_var in ??? ??? {
+	foreach cons_var in food_cons nonfood_cons {
 		
 		* Save labels 
 		local `cons_var'_lab: variable label `cons_var'
 		
 		* generate vars
-		gen `cons_var'_usd = ??? * ??? , after(???)
+		gen `cons_var'_usd = `cons_var' * $usd , after(`cons_var')
 		
 		* apply labels to new variables
-		lab var `cons_var'_usd ???
+		lab var `cons_var'_usd "`cons_var'_lab' (USD)"
 		
 	}
 	
 	// Exercise 3: Handle outliers ----
 		// you can use custom Winsorization function to handle outliers.
 
-	local winvars ??? ??? ???
+	local winvars food_cons_usd area_acre nonfood_cons_usd
 	
 	foreach win_var of local winvars {
 		
 		local `win_var'_lab: variable label `win_var'
 		
-		winsor 	`win_var', p(???) high gen(`win_var'_w)
+		winsor 	`win_var', p(0.05) high gen(`win_var'_w)
 		order 	`win_var'_w, after(`win_var')
 		lab var `win_var'_w "``win_var'_lab' (Winsorized 0.05)"
 		
 	}
 	
 	//Save tempfile	
+	
+	tempfile hh
+	save `hh'
 	
 	
 *-------------------------------------------------------------------------------	
@@ -78,25 +85,27 @@
 				// 3. Average sick days.
 				// 4. Total treatment cost in USD.
 	use "${data}/Intermediate/TZA_CCT_HH_mem.dta", clear
-	collapse 	(sum) ??? ///
-				(max) ??? ///
-				(mean) m_cost = ??? ???, by(???)
+	collapse 	(sum) treat_cost ///
+				(max) read sick ///
+				(mean) m_cost = treat_cost days_sick, by(hhid)
 				
-	replace treat_cost = ??? if mi(???)	
+	replace treat_cost = m_cost if mi(m_cost)	// missing na.rm=TRUE
 	
 				//Cost in USD
-	gen ??? = ??? * ???
+	gen treat_cost_usd = treat_cost * $usd
 
-				// Add labels	
+				// Add labels for everytime we have created new variables
 				
-	lab var ??? 		???
-	lab var ??? 		???
-	lab var ??? 		???
-	lab var ??? 		???
+	lab var read 		"Any member can read/write"
+	lab var sick 		"Any member was sick in the past 4 days"
+	lab var days_sick 		"Average sick days"
+	lab var treat_cost_usd 		"Total cost of treatment (USD)"
 	
-	drop ??? ??? 
+	drop treat_cost m_cost 
 
 				// Save tempfile  
+	tempfile mem
+	save `mem'
 	
 	
 *-------------------------------------------------------------------------------	
@@ -107,14 +116,13 @@
 	// Exercise 5: Merge HH and HH-member data ----
 		// Instructions:
 			// Merge the household-level data with the HH-member level indicators.
-	merge ??? ??? using ???, assert(3) nogen 
+	merge 1:1 hhid using `mem', assert(3) nogen 
 			
 			// Merge hh and member data with the treatment data, ensure the treatment status is included in the final dataset.
- 	merge ??? ??? using ???, assert(3) nogen 
-
-	
+ 	merge  m:1 vid using "${data}/Raw/treat_status.dta", assert(3) nogen 
 			//Save data
-
+	*save "${data}/Final/TZA_CCT_analysis.dta", replace
+	
 *-------------------------------------------------------------------------------	
 * Data construction: Secondary data
 *------------------------------------------------------------------------------- 	
@@ -125,8 +133,8 @@
 			// Calculate the total number of medical facilities by summing relevant columns.
 			// Apply appropriate labels to the new variables created.
 			
-	egen ??? = ???(??? ???)
-	lab var ??? ???
+	egen n_medical = rowtotal(n_clinic n_hospital)
+	lab var n_medical "No. of medical facilities"
 	
 	// Exercise 6: Save final dataset ----
 		// Instructions:
@@ -135,7 +143,7 @@
 			// Save both the HH dataset and the secondary data.
 
 			//Save data
-	save "${data}/Final/TZA_amenity_analysis.dta", replace
+	*save "${data}/Final/TZA_amenity_analysis.dta", replace
 
 	
 *************************************************************************** end!
